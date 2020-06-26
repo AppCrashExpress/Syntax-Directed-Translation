@@ -37,9 +37,14 @@ namespace MPTranslator
 
     public class SSDT
     {
-        public SSDT(string beginToken) 
+        public SSDT(string[] terms, string[] nonterms, string beginToken) 
         {
             this.beginToken = beginToken;
+            this.terms = Array.ConvertAll<string, TransNonTerm>(terms, (str) => new TransNonTerm(str));
+            this.nonterms = Array.ConvertAll<string, TransNonTerm>(nonterms, (str) => new TransNonTerm(str));
+
+            rules = new List<TransRule> { };
+            parsingTable = new TParsingTable(this);
         }
 
         public void AddRule(string head, List<string> body, Action<TransRule> semanticRule)
@@ -56,7 +61,7 @@ namespace MPTranslator
         {
             AddZeroRule();
 
-            // Add ParsingTable
+            parsingTable.Create();
 
             inputStack = ConvertInput(input);
             // int result = parsingTable.Parse();
@@ -69,6 +74,7 @@ namespace MPTranslator
                                                new List<TransNonTerm> { new TransNonTerm(beginToken) },
                                                (TransRule thisPlaceholder) => 
                                                     { thisPlaceholder.head.attrVal = thisPlaceholder.body[0].attrVal; } );
+            rules.Insert(0, zeroRule);
             beginToken = newHead;
         }
 
@@ -98,8 +104,11 @@ namespace MPTranslator
         }
 
         string beginToken;
+        TransNonTerm[] terms;
+        TransNonTerm[] nonterms;
         List<TransRule> rules;
         Stack<TransNonTerm> inputStack;
+        TParsingTable parsingTable;
 
         public class TParsingTable
         {
@@ -107,34 +116,121 @@ namespace MPTranslator
             {
                 this.parent = parent;
             }
+            
+            public void Create()
+            {
+                List<TransNonTerm> allTokens = new List<TransNonTerm> { };
+                allTokens.AddRange(parent.terms);
+                allTokens.AddRange(parent.nonterms);
+
+                HashSet<TItemState> stateSet = new HashSet<TItemState> { };
+                Queue<TItemState> transitionlessItems = new Queue<TItemState> { };
+
+                TItemState newState = new TItemState(new TItem(0, 0));
+                stateSet.Add(newState);
+                transitionlessItems.Enqueue(newState);
+
+                // do a while loop
+                while(transitionlessItems.Count != 0)
+                {
+                    List<TItem> closure = ComputeClosure(transitionlessItems.Dequeue());
+                }
+            }
 
             public void Parse()
             {
 
             }
 
-            private void Goto(int state, TransNonTerm token)
+            private List<TItem> ComputeClosure(List<TItem> itemSet)
             {
+                List<TItem> closure = new List<TItem>(itemSet);
+                List<TransRule> rules = parent.rules;
+                int prevCount = 0;
 
+                // Keep adding new items until size doesn't change
+                while( (closure.Count - prevCount) > 0 )
+                {
+                    prevCount = closure.Count;
+                    foreach(TItem item in closure)
+                    {
+                        TransNonTerm nextToken = rules[item.ruleNum].body[item.dotPos];
+                        for(int i = 0; i < rules.Count; ++i)
+                        {
+                            if (nextToken != rules[i].head) continue;
+                            TItem newItem = new TItem(i, 0);
+                            if (closure.Contains(newItem)) continue;
+                            closure.Add(newItem);
+                        }
+                    }
+                }
+
+                return null;
+            }
+
+            private List<TItem> Goto(List<TItem> itemSet, TransNonTerm nextTerm)
+            {
+                List<TItem> resultingSet = new List<TItem> { };
+
+                foreach(TItem item in itemSet)
+                {
+                    TransRule rule = parent.rules[item.ruleNum];
+                    if (rule.body[item.dotPos] == nextTerm)
+                    {
+                        resultingSet.Add(new TItem(item.ruleNum, item.dotPos + 1));
+                    }
+                }
+
+                return resultingSet;
+            }
+
+            private Action<TParsingTable> CreateShiftCallback()
+            {
+                return null;
+            }
+
+            private Action<TParsingTable> CreateReduceCallback()
+            {
+                return null;
             }
 
             private SSDT parent;
-        }
+            private Stack<int> stateStack;
+            private Stack<TransNonTerm> readTokens;
 
-        private struct TItem
-        {
-            // Represent item using number of rule
-            // and position of dot in it. This helps
-            // avoid cloning the rule.
-            // (Could instead create reference to rule?)
-            public TItem(int ruleNum, int dotPos)
+            public struct TItem
             {
-                this.ruleNum = ruleNum;
-                this.dotPos = dotPos;
+                // Represent item using number of rule
+                // and position of dot in it. This helps
+                // avoid cloning the rule.
+                // (Could instead create reference to rule?)
+                public TItem(int ruleNum, int dotPos)
+                {
+                    this.ruleNum = ruleNum;
+                    this.dotPos = dotPos;
+                }
+
+                public int ruleNum;
+                public int dotPos;
             }
 
-            public int ruleNum;
-            public int dotPos;
+            public class TItemState
+            {
+                public TItemState(TItem oneItem)
+                {
+                    stateItems = new List<TItem> {oneItem};
+                    transitions = new Dictionary<TransNonTerm, TItemState> { };
+                }
+
+                public TItemState(List<TItem> itemList)
+                {
+                    stateItems = itemList;
+                    transitions = new Dictionary<TransNonTerm, TItemState> { };
+                }
+
+                public List<TItem> stateItems;
+                public Dictionary<TransNonTerm, TItemState> transitions;
+            }
         }
     }
 
