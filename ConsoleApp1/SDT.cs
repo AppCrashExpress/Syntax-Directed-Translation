@@ -4,7 +4,7 @@ using System.Text;
 
 namespace MPTranslator
 {
-    public class TransNonTerm
+    public struct TransNonTerm
     {
         readonly public string nonterm;
         public int attrVal;
@@ -17,8 +17,8 @@ namespace MPTranslator
     }
     public class TransRule
     {
-        readonly public TransNonTerm head;
-        readonly public List<TransNonTerm> body;
+        public TransNonTerm head;
+        public List<TransNonTerm> body;
         readonly Action<TransRule> semanticRule;
 
         public TransRule(TransNonTerm head, List<TransNonTerm> body, Action<TransRule> semanticRule)
@@ -119,22 +119,63 @@ namespace MPTranslator
             
             public void Create()
             {
-                List<TransNonTerm> allTokens = new List<TransNonTerm> { };
-                allTokens.AddRange(parent.terms);
-                allTokens.AddRange(parent.nonterms);
+                stateSet = FindAllStates();
 
-                HashSet<TItemState> stateSet = new HashSet<TItemState> { };
+
+            }
+            private HashSet<TItemState> FindAllStates()
+            {
+                HashSet<TransNonTerm> allTokens = new HashSet<TransNonTerm> { };
+                foreach (TransNonTerm nonterm in parent.nonterms)
+                {
+                    allTokens.Add(nonterm);
+                }
+                foreach (TransNonTerm term in parent.terms)
+                {
+                    allTokens.Add(term);
+                }
+
+                HashSet<TItemState> foundStates = new HashSet<TItemState> { };
                 Queue<TItemState> transitionlessItems = new Queue<TItemState> { };
 
-                TItemState newState = new TItemState(new TItem(0, 0));
-                stateSet.Add(newState);
-                transitionlessItems.Enqueue(newState);
+                    // Didn't want to create a variable for one time use
+                    // So, created a variable with reuseable name
+                    // These three lines add initial state kernel [S' -> .S]
+                TItemState kernelState = new TItemState(new TItem(0, 0));
+                foundStates.Add(kernelState);
+                transitionlessItems.Enqueue(kernelState);
 
-                // do a while loop
                 while(transitionlessItems.Count != 0)
                 {
-                    List<TItem> closure = ComputeClosure(transitionlessItems.Dequeue());
+                    kernelState = transitionlessItems.Dequeue();
+                    TItemState kernelClosure = ComputeClosure(kernelState);
+
+                    foreach(TransNonTerm token in allTokens)
+                    {
+                        TItemState newState = Goto(kernelClosure, token);
+                        if (newState.stateItems.Count == 0)
+                            { continue; }
+                        kernelState.transitions[token] = newState;
+
+                        bool stateInSet = false;
+                        foreach(TItemState state in foundStates)
+                        {
+                            if (state.Equals(newState)) 
+                            { 
+                                stateInSet = true; 
+                                break;
+                            }
+                        }
+
+                        if (!stateInSet)
+                        {
+                            foundStates.Add(newState);
+                            transitionlessItems.Enqueue(newState);
+                        }
+                    }
                 }
+
+                return foundStates;
             }
 
             public void Parse()
@@ -142,22 +183,24 @@ namespace MPTranslator
 
             }
 
-            private List<TItem> ComputeClosure(List<TItem> itemSet)
+            private TItemState ComputeClosure(TItemState itemState)
             {
-                List<TItem> closure = new List<TItem>(itemSet);
                 List<TransRule> rules = parent.rules;
+                HashSet<TItem> closure = new HashSet<TItem>(itemState.stateItems);
                 int prevCount = 0;
 
                 // Keep adding new items until size doesn't change
                 while( (closure.Count - prevCount) > 0 )
                 {
                     prevCount = closure.Count;
-                    foreach(TItem item in closure)
+                    foreach(TItem item in new HashSet<TItem>(closure)) // Clone because c# is dumb
                     {
+                        if (rules[item.ruleNum].body.Count == item.dotPos) continue;
+
                         TransNonTerm nextToken = rules[item.ruleNum].body[item.dotPos];
                         for(int i = 0; i < rules.Count; ++i)
                         {
-                            if (nextToken != rules[i].head) continue;
+                            if (nextToken.nonterm != rules[i].head.nonterm) continue;
                             TItem newItem = new TItem(i, 0);
                             if (closure.Contains(newItem)) continue;
                             closure.Add(newItem);
@@ -165,23 +208,24 @@ namespace MPTranslator
                     }
                 }
 
-                return null;
+                return new TItemState(closure);
             }
 
-            private List<TItem> Goto(List<TItem> itemSet, TransNonTerm nextTerm)
+            private TItemState Goto(TItemState itemState, TransNonTerm nextTerm)
             {
-                List<TItem> resultingSet = new List<TItem> { };
+                HashSet<TItem> resultingSet = new HashSet<TItem> { };
 
-                foreach(TItem item in itemSet)
+                foreach(TItem item in itemState.stateItems)
                 {
                     TransRule rule = parent.rules[item.ruleNum];
-                    if (rule.body[item.dotPos] == nextTerm)
+                    if (rule.body.Count == item.dotPos) continue;
+                    if (rule.body[item.dotPos].nonterm == nextTerm.nonterm)
                     {
                         resultingSet.Add(new TItem(item.ruleNum, item.dotPos + 1));
                     }
                 }
 
-                return resultingSet;
+                return new TItemState(resultingSet);
             }
 
             private Action<TParsingTable> CreateShiftCallback()
@@ -194,8 +238,9 @@ namespace MPTranslator
                 return null;
             }
 
-            private SSDT parent;
-            private Stack<int> stateStack;
+            private SSDT                parent;
+            private HashSet<TItemState> stateSet;
+            private Stack<int>          stateStack;
             private Stack<TransNonTerm> readTokens;
 
             public struct TItem
@@ -218,17 +263,25 @@ namespace MPTranslator
             {
                 public TItemState(TItem oneItem)
                 {
-                    stateItems = new List<TItem> {oneItem};
+                    stateItems = new HashSet<TItem> {oneItem};
                     transitions = new Dictionary<TransNonTerm, TItemState> { };
                 }
 
-                public TItemState(List<TItem> itemList)
+                public TItemState(HashSet<TItem> itemList)
                 {
                     stateItems = itemList;
                     transitions = new Dictionary<TransNonTerm, TItemState> { };
                 }
 
-                public List<TItem> stateItems;
+                public bool Equals(TItemState other)
+                {
+                    if (this.stateItems.SetEquals(other.stateItems))
+                        return true;
+                    else
+                        return false;
+                }
+
+                public HashSet<TItem> stateItems;
                 public Dictionary<TransNonTerm, TItemState> transitions;
             }
         }
