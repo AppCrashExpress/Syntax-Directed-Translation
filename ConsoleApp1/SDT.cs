@@ -282,7 +282,7 @@ namespace MPTranslator
             public TParsingTable(SSDT parent)
             {
                 this.parent = parent;
-                ruleList = parent.rules;
+                ruleList   = parent.rules;
                 stateStack = parent.stateStack;
                 tokenStack = parent.tokenStack;
                 inputQueue = parent.inputQueue;
@@ -292,6 +292,8 @@ namespace MPTranslator
             {
                 stateList = FindAllStates();
 
+                actionTable = GenerateActionTable();
+                gotoTable   = GenerateGotoTable();
 
             }
 
@@ -312,13 +314,15 @@ namespace MPTranslator
                     allTokens.Add(term);
                 }
 
-                List<TItemState> foundStates = new List<TItemState> { };
+                List<TItemState>  foundStates = new List<TItemState> { };
                 Queue<TItemState> transitionlessItems = new Queue<TItemState> { };
+                int stateIdCounter = 0;
 
                     // Didn't want to create a variable for one time use
                     // So, created a variable with reuseable name
                     // These three lines add initial state kernel [S' -> .S]
                 TItemState kernelState = new TItemState(new TItem(0, 0));
+                kernelState.stateId = stateIdCounter++;
                 foundStates.Add(kernelState);
                 transitionlessItems.Enqueue(kernelState);
 
@@ -338,7 +342,8 @@ namespace MPTranslator
                         foreach(TItemState state in foundStates)
                         {
                             if (state.Equals(newState)) 
-                            { 
+                            {
+                                kernelState.transitions[token] = state;
                                 stateInSet = true; 
                                 break;
                             }
@@ -346,6 +351,7 @@ namespace MPTranslator
 
                         if (!stateInSet)
                         {
+                            newState.stateId = stateIdCounter++;
                             foundStates.Add(newState);
                             transitionlessItems.Enqueue(newState);
                         }
@@ -355,9 +361,61 @@ namespace MPTranslator
                 return foundStates;
             }
 
-            private void GenerateTable()
+            private Dictionary<Tuple<int, TransNonTerm>, Action> GenerateActionTable()
             {
+                var table = new Dictionary<Tuple<int, TransNonTerm>, Action> { };
 
+                // Looks horrible, I know
+                foreach (TItemState state in stateList)
+                {
+                    foreach (var transition in state.transitions)
+                    {
+                        if (!parent.terms.Contains(transition.Key))
+                            { continue; }
+
+                        table.Add(
+                            new Tuple<int, TransNonTerm> (state.stateId, transition.Key),
+                            CreateShiftCallback(transition.Value.stateId)
+                        );
+                    }
+
+                    for (int i = 0; i < parent.rules.Count; ++i)
+                    {
+                        if ( state.stateItems.Contains(new TItem(i, parent.rules[i].body.Count)) )
+                        {
+                            foreach(TransNonTerm followToken in parent.followSets[parent.rules[i].head])
+                            {
+                                table.Add(
+                                    new Tuple<int, TransNonTerm>(state.stateId, followToken),
+                                    CreateReduceCallback(i)
+                                );
+                            }
+                        }
+                    }
+                }
+
+                return table;
+            }
+
+            private Dictionary<Tuple<int, TransNonTerm>, int> GenerateGotoTable()
+            {
+                var table = new Dictionary<Tuple<int, TransNonTerm>, int> { };
+
+                foreach (TItemState state in stateList)
+                {
+                    foreach(var transition in state.transitions)
+                    {
+                        if (!parent.nonterms.Contains(transition.Key))
+                            { continue; }
+
+                        table.Add(
+                            new Tuple<int, TransNonTerm> (state.stateId, transition.Key),
+                            transition.Value.stateId
+                        );
+                    }
+                }
+
+                return table;
             }
 
             private TItemState ComputeClosure(TItemState itemState)
@@ -416,8 +474,25 @@ namespace MPTranslator
             private Action CreateReduceCallback(int ruleIndex)
             {
                 return () => {
+                    TransRule rule = parent.rules[ruleIndex];
 
+                    for(int i = rule.body.Count; i > 0; --i)
+                        { parent.stateStack.Pop(); }
+                    for(int i = rule.body.Count - 1; i >= 0; --i)
+                    {
+                        rule.body[i] = tokenStack.Pop();
+                    }
+
+                    rule.ApplyRule();
+                    tokenStack.Push(rule.head);
+
+                    stateStack.Push(GetStateFromGoto(stateStack.Peek(), tokenStack.Peek()) );
                 };
+            }
+
+            private int GetStateFromGoto(int state, TransNonTerm token)
+            {
+                return gotoTable[new Tuple<int, TransNonTerm> (state, token)];
             }
 
             private SSDT             parent;
@@ -427,6 +502,9 @@ namespace MPTranslator
             private Stack<int>          stateStack;
             private Stack<TransNonTerm> tokenStack;
             private Queue<TransNonTerm> inputQueue;
+
+            private Dictionary<Tuple<int, TransNonTerm>, Action> actionTable;
+            private Dictionary<Tuple<int, TransNonTerm>, int>    gotoTable;
 
             public struct TItem
             {

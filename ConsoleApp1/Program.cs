@@ -8,7 +8,7 @@ namespace MPTranslator
         static void Main(string[] args)
         {
             SSDT translator = new SSDT(
-                new string[] { "i", "(", ")", "-", "+", "*", "/" },
+                new string[] { "(", ")", "i", "-", "+", "*", "/" },
                 new string[] { "E", "T", "F" },
                 "E"
             );
