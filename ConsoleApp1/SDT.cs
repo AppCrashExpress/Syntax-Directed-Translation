@@ -62,7 +62,8 @@ namespace MPTranslator
         public void Execute(string input)
         {
             AddZeroRule();
-            firstSets = ComputeFirstSets();
+            firstSets  = ComputeFirstSets();
+            followSets = ComputeFollowSets();
 
             parsingTable.BuildTable();
 
@@ -140,7 +141,7 @@ namespace MPTranslator
             return firstSets;
         }
 
-        // If rule contains body other than one empty symbol, see which 'first's it has
+        // If rule contains body other than one empty symbol, create firsts set for it
         private bool ComputeBodyFirstSets(Dictionary<TransNonTerm, HashSet<TransNonTerm>> firstSets, TransRule rule)
         {
             bool notDone = false;
@@ -174,6 +175,82 @@ namespace MPTranslator
             }
 
             return notDone;
+        }
+
+        private Dictionary<TransNonTerm, HashSet<TransNonTerm>> ComputeFollowSets()
+        {
+            Dictionary<TransNonTerm, HashSet<TransNonTerm>> followSets = InitilizeSets();
+            followSets[rules[0].head].Add(new TransNonTerm("$"));
+
+            bool notDone;
+            do {
+                notDone = false;
+
+                foreach(TransRule rule in rules)
+                {
+                    for(int i = 0; i < rule.body.Count; ++i)
+                    {
+                        TransNonTerm token = rule.body[i];
+                        if (!nonterms.Contains(token))
+                            { continue; }
+
+                        HashSet<TransNonTerm> nextTokenFirsts = GetNextTokenFirsts(rule, i + 1);
+                        foreach(TransNonTerm first in nextTokenFirsts)
+                        {
+                            if ( first.Equals(new TransNonTerm("")) )
+                            {
+                                foreach(TransNonTerm headFirst in followSets[rule.head])
+                                {
+                                    notDone |= followSets[token].Add(headFirst);
+                                }
+                            }
+                            else
+                            {
+                                notDone |= followSets[token].Add(first);
+                            }
+                        }
+                    }
+                }
+
+            } while (notDone);
+
+            return followSets;
+        }
+
+        private HashSet<TransNonTerm> GetNextTokenFirsts(TransRule rule, int nextTokenIndex)
+        {
+            HashSet<TransNonTerm> result = new HashSet<TransNonTerm> { };
+            bool containsEpsilon = true;
+
+            for (int i = nextTokenIndex; i < rule.body.Count; ++i)
+            {
+                TransNonTerm token = rule.body[i];
+                containsEpsilon = false;
+
+                if (terms.Contains(token))
+                {
+                    result.Add(token);
+                    break;
+                }
+
+                foreach(TransNonTerm first in firstSets[token])
+                {
+                    if (first.Equals(new TransNonTerm("")))
+                        { containsEpsilon = true; }
+
+                    result.Add(first);
+                }
+
+                containsEpsilon |= firstSets[token].Count == 0;
+
+                if (!containsEpsilon)
+                    { break; }
+            }
+
+            if (containsEpsilon)
+                { result.Add(new TransNonTerm("")); }
+
+            return result;
         }
 
         private Dictionary<TransNonTerm, HashSet<TransNonTerm>> InitilizeSets()
