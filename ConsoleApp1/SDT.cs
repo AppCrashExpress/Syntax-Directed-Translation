@@ -1,19 +1,21 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
+using System.Linq;
 using System.Text;
 
 namespace MPTranslator
 {
     public struct TransNonTerm
     {
-        readonly public string nonterm;
-        public int attrVal;
-
-        public TransNonTerm(string nonterm)
+        public TransNonTerm(string nonterm, int attrVal = 0)
         {
             this.nonterm = nonterm;
-            attrVal = 0;
+            this.attrVal = attrVal;
         }
+
+        readonly public string nonterm;
+        public int attrVal;
     }
     public class TransRule
     {
@@ -60,10 +62,11 @@ namespace MPTranslator
         public void Execute(string input)
         {
             AddZeroRule();
+            firstSets = ComputeFirstSets();
 
-            parsingTable.Create();
+            parsingTable.BuildTable();
 
-            inputStack = ConvertInput(input);
+            inputQueue = ConvertInput(input);
             // int result = parsingTable.Parse();
         }
 
@@ -78,9 +81,9 @@ namespace MPTranslator
             beginToken = newHead;
         }
 
-        Stack<TransNonTerm> ConvertInput(string input)
+        private Queue<TransNonTerm> ConvertInput(string input)
         {
-            Stack<TransNonTerm> newInputStack = new Stack<TransNonTerm> { };
+            Queue<TransNonTerm> newInputQueue = new Queue<TransNonTerm> { };
             string[] splitInput = input.Split(' ');
 
             foreach(string token in splitInput)
@@ -89,41 +92,138 @@ namespace MPTranslator
                 TransNonTerm termToAdd;
                 if (Int32.TryParse(token, out val))
                 {
-                    termToAdd = new TransNonTerm("i");
-                    termToAdd.attrVal = val;
+                    termToAdd = new TransNonTerm("i", val);
                 }
                 else
                 {
                     termToAdd = new TransNonTerm(token);
                 }
 
-                newInputStack.Push(termToAdd);
+                newInputQueue.Enqueue(termToAdd);
             }
+            newInputQueue.Enqueue(new TransNonTerm("$"));
 
-            return newInputStack;
+            return newInputQueue;
         }
 
-        string beginToken;
-        TransNonTerm[] terms;
-        TransNonTerm[] nonterms;
-        List<TransRule> rules;
-        Stack<TransNonTerm> inputStack;
-        TParsingTable parsingTable;
+        // retards can't make typedef lmao
+        private Dictionary<TransNonTerm, HashSet<TransNonTerm>> ComputeFirstSets()
+        {
+            Dictionary<TransNonTerm, HashSet<TransNonTerm>> firstSets = InitilizeSets();
+
+            bool notDone;
+            do {
+                notDone = false;
+
+                // "bool1 |= bool2" is the same is "bool1 = bool1 | bool2"
+                // If either of them is true, then bool1 is true
+                // If we get at least one true, then the set changed
+                //     and calculation continues
+                foreach (TransRule rule in rules)
+                {
+                    if (rule.body.Count == 1 && rule.body[0].nonterm == "")
+                    {
+                        notDone |= firstSets[rule.head].Add(new TransNonTerm(""));
+                    }
+                    else
+                    {
+                        notDone |= ComputeBodyFirstSets(firstSets, rule);
+                    }
+                }
+            } while (notDone);
+
+            foreach (TransNonTerm term in terms)
+            {
+                firstSets.Add(term, new HashSet<TransNonTerm> { term });
+            }
+
+            return firstSets;
+        }
+
+        // If rule contains body other than one empty symbol, see which 'first's it has
+        private bool ComputeBodyFirstSets(Dictionary<TransNonTerm, HashSet<TransNonTerm>> firstSets, TransRule rule)
+        {
+            bool notDone = false;
+            bool containsEpsilon = true;
+
+            foreach(TransNonTerm token in rule.body)
+            {
+                containsEpsilon = false;
+
+                if (terms.Contains(token))
+                {
+                    notDone |= firstSets[rule.head].Add(token);
+                    break;
+                }
+
+                foreach(TransNonTerm element in firstSets[token])
+                {
+                    if (element.Equals(new TransNonTerm("")))
+                        { containsEpsilon = true; }
+
+                    notDone |= firstSets[rule.head].Add(element);
+                }
+
+                if (!containsEpsilon)
+                    { break; }
+            }
+
+            if (containsEpsilon)
+            {
+                notDone |= firstSets[rule.head].Add(new TransNonTerm(""));
+            }
+
+            return notDone;
+        }
+
+        private Dictionary<TransNonTerm, HashSet<TransNonTerm>> InitilizeSets()
+        {
+            Dictionary<TransNonTerm, HashSet<TransNonTerm>> fSets = new Dictionary<TransNonTerm, HashSet<TransNonTerm>> { };
+            fSets.Add(new TransNonTerm(beginToken), new HashSet<TransNonTerm> { });
+            foreach (TransNonTerm nonterm in nonterms)
+            {
+                fSets.Add(nonterm, new HashSet<TransNonTerm> { });
+            }
+
+            return fSets;
+        }
+
+        private string          beginToken;
+        private TransNonTerm[]  terms;
+        private TransNonTerm[]  nonterms;
+        private List<TransRule> rules;
+        private Dictionary<TransNonTerm, HashSet<TransNonTerm>> firstSets;
+        private Dictionary<TransNonTerm, HashSet<TransNonTerm>> followSets;
+
+        private Stack<int> stateStack;
+        private Stack<TransNonTerm> tokenStack;
+        private Queue<TransNonTerm> inputQueue;
+        private TParsingTable parsingTable;
 
         public class TParsingTable
         {
             public TParsingTable(SSDT parent)
             {
                 this.parent = parent;
+                ruleList = parent.rules;
+                stateStack = parent.stateStack;
+                tokenStack = parent.tokenStack;
+                inputQueue = parent.inputQueue;
             }
             
-            public void Create()
+            public void BuildTable()
             {
-                stateSet = FindAllStates();
+                stateList = FindAllStates();
 
 
             }
-            private HashSet<TItemState> FindAllStates()
+
+            public void Parse()
+            {
+
+            }
+
+            private List<TItemState> FindAllStates()
             {
                 HashSet<TransNonTerm> allTokens = new HashSet<TransNonTerm> { };
                 foreach (TransNonTerm nonterm in parent.nonterms)
@@ -135,7 +235,7 @@ namespace MPTranslator
                     allTokens.Add(term);
                 }
 
-                HashSet<TItemState> foundStates = new HashSet<TItemState> { };
+                List<TItemState> foundStates = new List<TItemState> { };
                 Queue<TItemState> transitionlessItems = new Queue<TItemState> { };
 
                     // Didn't want to create a variable for one time use
@@ -178,7 +278,7 @@ namespace MPTranslator
                 return foundStates;
             }
 
-            public void Parse()
+            private void GenerateTable()
             {
 
             }
@@ -228,20 +328,28 @@ namespace MPTranslator
                 return new TItemState(resultingSet);
             }
 
-            private Action<TParsingTable> CreateShiftCallback()
+            private Action CreateShiftCallback(int newState)
             {
-                return null;
+                return () => {
+                    stateStack.Push(newState);
+                    tokenStack.Push(inputQueue.Dequeue());
+                };
             }
 
-            private Action<TParsingTable> CreateReduceCallback()
+            private Action CreateReduceCallback(int ruleIndex)
             {
-                return null;
+                return () => {
+
+                };
             }
 
-            private SSDT                parent;
-            private HashSet<TItemState> stateSet;
+            private SSDT             parent;
+            private List<TItemState> stateList;
+
+            private List<TransRule>     ruleList;
             private Stack<int>          stateStack;
-            private Stack<TransNonTerm> readTokens;
+            private Stack<TransNonTerm> tokenStack;
+            private Queue<TransNonTerm> inputQueue;
 
             public struct TItem
             {
@@ -281,6 +389,7 @@ namespace MPTranslator
                         return false;
                 }
 
+                public int stateId;
                 public HashSet<TItem> stateItems;
                 public Dictionary<TransNonTerm, TItemState> transitions;
             }
