@@ -14,6 +14,20 @@ namespace MPTranslator
             this.attrVal = attrVal;
         }
 
+        public override bool Equals(object obj)
+        {
+            if ( !(obj is TransNonTerm) )
+                { return false; }
+
+            TransNonTerm other = (TransNonTerm)obj;
+            return this.nonterm == other.nonterm;
+        }
+
+        public override int GetHashCode()
+        {
+            return nonterm.GetHashCode();
+        }
+
         readonly public string nonterm;
         public int attrVal;
     }
@@ -59,16 +73,15 @@ namespace MPTranslator
             rules.Add(new TransRule(new TransNonTerm(head), convertedBody, semanticRule));
         }
 
-        public void Execute(string input)
+        public int Execute(string input)
         {
             AddZeroRule();
             firstSets  = ComputeFirstSets();
             followSets = ComputeFollowSets();
 
             parsingTable.BuildTable();
-
-            inputQueue = ConvertInput(input);
-            // int result = parsingTable.Parse();
+;
+            return parsingTable.Parse(ConvertInput(input));
         }
 
         private void AddZeroRule()
@@ -272,9 +285,6 @@ namespace MPTranslator
         private Dictionary<TransNonTerm, HashSet<TransNonTerm>> firstSets;
         private Dictionary<TransNonTerm, HashSet<TransNonTerm>> followSets;
 
-        private Stack<int> stateStack;
-        private Stack<TransNonTerm> tokenStack;
-        private Queue<TransNonTerm> inputQueue;
         private TParsingTable parsingTable;
 
         public class TParsingTable
@@ -283,9 +293,6 @@ namespace MPTranslator
             {
                 this.parent = parent;
                 ruleList   = parent.rules;
-                stateStack = parent.stateStack;
-                tokenStack = parent.tokenStack;
-                inputQueue = parent.inputQueue;
             }
             
             public void BuildTable()
@@ -294,12 +301,29 @@ namespace MPTranslator
 
                 actionTable = GenerateActionTable();
                 gotoTable   = GenerateGotoTable();
-
             }
 
-            public void Parse()
+            public int Parse(Queue<TransNonTerm> input)
             {
+                inputQueue = input;
+                tokenStack = new Stack<TransNonTerm> { };
+                stateStack = new Stack<int> { };
+                stateStack.Push(0);
 
+                while ( !GetEndCondition() )
+                {
+                    var tablePosition =
+                        new Tuple<int, TransNonTerm> (stateStack.Peek(), inputQueue.Peek());
+                    actionTable[tablePosition]();
+                }
+
+                return tokenStack.Peek().attrVal;
+            }
+
+            private bool GetEndCondition()
+            {
+                TransNonTerm inputEndSymbol = new TransNonTerm("$");
+                return inputQueue.Peek().Equals(inputEndSymbol) && stateStack.Peek() == 1;
             }
 
             private List<TItemState> FindAllStates()
@@ -477,7 +501,7 @@ namespace MPTranslator
                     TransRule rule = parent.rules[ruleIndex];
 
                     for(int i = rule.body.Count; i > 0; --i)
-                        { parent.stateStack.Pop(); }
+                        { stateStack.Pop(); }
                     for(int i = rule.body.Count - 1; i >= 0; --i)
                     {
                         rule.body[i] = tokenStack.Pop();

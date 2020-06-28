@@ -106,7 +106,7 @@ namespace MPTranslator
                     { placeholder.head.attrVal = placeholder.body[0].attrVal; }
             );
 
-            translator.Execute("5 + 3");
+            System.Console.WriteLine(translator.Execute("5 + 3"));
         }
     }
 }
