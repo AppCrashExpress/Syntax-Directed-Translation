@@ -293,7 +293,6 @@ namespace MPTranslator
             public TParsingTable(SSDT parent)
             {
                 this.parent = parent;
-                ruleList   = parent.rules;
             }
             
             public void BuildTable()
@@ -506,7 +505,6 @@ namespace MPTranslator
             private SSDT                parent;
             private HashSet<TItemState> stateSet;
 
-            private List<TransRule>   ruleList;
             private Stack<int>        stateStack;
             private Stack<TransToken> tokenStack;
             private Queue<TransToken> inputQueue;
