@@ -34,10 +34,6 @@ namespace MPTranslator
 
     public class TransRule
     {
-        public TransToken head;
-        public List<TransToken> body;
-        readonly Action<TransRule> semanticRule;
-
         public TransRule(TransToken head, List<TransToken> body, Action<TransRule> semanticRule)
         {
             this.head = head;
@@ -49,6 +45,10 @@ namespace MPTranslator
         {
             semanticRule(this);
         }
+
+        public TransToken       head;
+        public List<TransToken> body;
+        readonly private Action<TransRule> semanticRule;
     }
 
     public class SSDT
@@ -56,8 +56,8 @@ namespace MPTranslator
         public SSDT(string[] terms, string[] nonterms, string beginToken) 
         {
             this.beginToken = beginToken;
-            this.terms    = Array.ConvertAll(terms,    (str) => new TransToken(str));
-            this.nonterms = Array.ConvertAll(nonterms, (str) => new TransToken(str));
+            this.terms      = Array.ConvertAll(terms,    (str) => new TransToken(str));
+            this.nonterms   = Array.ConvertAll(nonterms, (str) => new TransToken(str));
 
             rules = new List<TransRule> { };
         }
@@ -71,15 +71,19 @@ namespace MPTranslator
         public int Execute(string input)
         {
             if (parsingTable == null)
-                { Initilize(); }
-;
+            { 
+                PrintGrammar();
+                Initilize();
+                PrintSets();
+            }
+
             return parsingTable.Parse(ConvertInput(input));
         }
 
         private void Initilize()
         {
             AddZeroRule();
-            firstSets = ComputeFirstSets();
+            firstSets  = ComputeFirstSets();
             followSets = ComputeFollowSets();
 
             parsingTable = new TParsingTable(this);
@@ -279,9 +283,69 @@ namespace MPTranslator
             return fSets;
         }
 
+        private void PrintGrammar()
+        {
+            Console.Write("Non-terminals: ");
+            foreach(TransToken nonterm in nonterms)
+            {
+                Console.Write("{0} ", nonterm.token);
+            }
+            Console.WriteLine();
+
+            Console.Write("Terminals: ");
+            foreach (TransToken term in terms)
+            {
+                Console.Write("{0} ", term.token);
+            }
+            Console.WriteLine();
+
+            Console.WriteLine("Starting symbol: {0}", beginToken);
+
+            Console.WriteLine("Rules:");
+            foreach(TransRule rule in rules)
+            {
+                Console.Write("{0} -> ", rule.head.token);
+                foreach(TransToken bodyToken in rule.body)
+                {
+                    Console.Write("{0} ", bodyToken.token);
+                }
+                Console.WriteLine();
+            }
+            Console.WriteLine();
+        }
+
+        private void PrintSets()
+        {
+            Console.WriteLine("First sets:");
+            foreach(KeyValuePair<TransToken, HashSet<TransToken>> set in firstSets)
+            {
+                if (terms.Contains(set.Key)) continue;
+
+                Console.Write("{0} : ", set.Key.token);
+                foreach(TransToken reachableToken in set.Value)
+                {
+                    Console.Write("{0} ", reachableToken.token);
+                }
+                Console.WriteLine();
+            }
+            Console.WriteLine();
+
+            Console.WriteLine("Follow sets:");
+            foreach (KeyValuePair<TransToken, HashSet<TransToken>> set in followSets)
+            {
+                Console.Write("{0} : ", set.Key.token);
+                foreach (TransToken followingToken in set.Value)
+                {
+                    Console.Write("{0} ", followingToken.token);
+                }
+                Console.WriteLine();
+            }
+            Console.WriteLine();
+        }
+
         private string          beginToken;
-        private TransToken[]  terms;
-        private TransToken[]  nonterms;
+        private TransToken[]    terms;
+        private TransToken[]    nonterms;
         private List<TransRule> rules;
         private Dictionary<TransToken, HashSet<TransToken>> firstSets;
         private Dictionary<TransToken, HashSet<TransToken>> followSets;
@@ -298,9 +362,16 @@ namespace MPTranslator
             public void BuildTable()
             {
                 stateSet = FindAllStates();
+                foreach(TItemState state in stateSet)
+                {
+                    PrintState(state);
+                    Console.WriteLine();
+                }
 
                 actionTable = GenerateActionTable();
+                Console.WriteLine();
                 gotoTable   = GenerateGotoTable();
+                Console.WriteLine();
             }
 
             public int Parse(Queue<TransToken> input)
@@ -357,13 +428,18 @@ namespace MPTranslator
                             { continue; }
                         kernelState.transitions[token] = newState;
 
-                        bool fuck = foundStates.Contains(newState);
-                        int  ass  = newState.GetHashCode();
-                        if (foundStates.TryGetValue(newState, out var oldState))
+                        bool stateInSet = false;
+                        foreach (TItemState oldState in foundStates)
                         {
-                            kernelState.transitions[token] = oldState;
+                            if (oldState.Equals(newState))
+                            {
+                                kernelState.transitions[token] = oldState;
+                                stateInSet = true;
+                                break;
+                            }
                         }
-                        else
+
+                        if (!stateInSet)
                         {
                             newState.stateId = stateIdCounter++;
                             foundStates.Add(newState);
@@ -379,7 +455,9 @@ namespace MPTranslator
             {
                 var table = new Dictionary<Tuple<int, TransToken>, Action> { };
 
-                // Looks horrible, I know
+                Console.WriteLine();
+                Console.WriteLine("ACTION TABLE:");
+
                 foreach (TItemState state in stateSet)
                 {
                     foreach (var transition in state.transitions.Where(entry => parent.terms.Contains(entry.Key))) 
@@ -388,6 +466,8 @@ namespace MPTranslator
                             new Tuple<int, TransToken> (state.stateId, transition.Key),
                             CreateShiftCallback(transition.Value.stateId)
                         );
+                        Console.WriteLine("ACTION[{0}, {1}] = Shift({2})",
+                            state.stateId, transition.Key.token, transition.Value.stateId);
                     }
 
                     for (int i = 0; i < parent.rules.Count; ++i)
@@ -402,6 +482,8 @@ namespace MPTranslator
                                 new Tuple<int, TransToken>(state.stateId, followToken),
                                 CreateReduceCallback(i)
                             );
+                            Console.WriteLine("ACTION[{0}, {1}] = Reduce({2})",
+                                state.stateId, followToken.token, i);
                         }
                     }
                 }
@@ -413,6 +495,9 @@ namespace MPTranslator
             {
                 var table = new Dictionary<Tuple<int, TransToken>, int> { };
 
+                Console.WriteLine();
+                Console.WriteLine("GOTO TABLE:");
+
                 foreach (TItemState state in stateSet)
                 {
                     foreach(var transition in state.transitions.Where(entry => parent.nonterms.Contains(entry.Key)))
@@ -421,6 +506,8 @@ namespace MPTranslator
                             new Tuple<int, TransToken> (state.stateId, transition.Key),
                             transition.Value.stateId
                         );
+                        Console.WriteLine("GOTO[{0}, {1}] = {2}",
+                            state.stateId, transition.Key.token, transition.Value.stateId);
                     }
                 }
 
@@ -429,7 +516,7 @@ namespace MPTranslator
 
             private TItemState ComputeClosure(TItemState itemState)
             {
-                List<TransRule> rules  = parent.rules;
+                List<TransRule> rules     = parent.rules;
                 HashSet<TItem>  closure   = new HashSet<TItem>(itemState.stateItems);
                 Queue<TItem>    closeless = new Queue<TItem>(itemState.stateItems);
 
@@ -512,6 +599,52 @@ namespace MPTranslator
             private Dictionary<Tuple<int, TransToken>, Action> actionTable;
             private Dictionary<Tuple<int, TransToken>, int>    gotoTable;
 
+            public void PrintState(TItemState state)
+            {
+                TItemState closure = ComputeClosure(state);
+
+                Console.Write("I{0} : ", state.stateId);
+                PrintItemSet(state.stateItems);
+                Console.WriteLine();
+
+                Console.Write("Closure: ");
+                PrintItemSet(closure.stateItems);
+                Console.WriteLine();
+
+                foreach(KeyValuePair<TransToken, TItemState> trans in state.transitions)
+                {
+                    Console.Write("GOTO[{0}, {1}] : ", trans.Value.stateId, trans.Key.token);
+                    PrintItemSet(trans.Value.stateItems);
+                    Console.WriteLine();
+                }
+            }
+
+            private void PrintItemSet(HashSet<TItem> itemSet)
+            {
+                Console.Write("{ ");
+                foreach (TItem item in itemSet)
+                {
+                    PrintItem(item);
+                    Console.Write("; ");
+                }
+                Console.Write("}");
+            }
+
+            private void PrintItem(TItem item)
+            {
+                TransRule rule = parent.rules[item.ruleNum];
+                Console.Write("{0} -> ", rule.head.token);
+                for (int i = 0; i < item.dotPos; ++i)
+                {
+                    Console.Write("{0} ", rule.body[i].token);
+                }
+                Console.Write(".");
+                for (int i = item.dotPos; i < rule.body.Count; ++i)
+                {
+                    Console.Write("{0} ", rule.body[i].token);
+                }
+            }
+
             public struct TItem
             {
                 // Represent item using number of rule
@@ -564,9 +697,9 @@ namespace MPTranslator
                     return hash;
                 }
 
-                public int stateId;
-                public HashSet<TItem> stateItems;
-                public Dictionary<TransToken, TItemState> transitions;
+                public  int stateId;
+                public  HashSet<TItem> stateItems;
+                public  Dictionary<TransToken, TItemState> transitions;
             }
         }
     }
