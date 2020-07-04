@@ -383,10 +383,17 @@ namespace MPTranslator
 
                 while ( !GetEndCondition() )
                 {
+                    PrintParsingProcess();
+
                     var tablePosition =
                         new Tuple<int, TransToken> (stateStack.Peek(), inputQueue.Peek());
                     actionTable[tablePosition]();
+
+                    Console.WriteLine();
                 }
+
+                PrintParsingProcess();
+                Console.WriteLine("ACTION: End\nResult: {0}", tokenStack.Peek().attrVal);
 
                 return tokenStack.Peek().attrVal;
             }
@@ -405,7 +412,7 @@ namespace MPTranslator
 
                 var foundStates         = new HashSet<TItemState> { };
                 var transitionlessItems = new Queue<TItemState> { };
-                int stateIdCounter = 0;
+                int stateIdCounter      = 0;
 
                     // Didn't want to create a variable for one time use
                     // So, created a variable with reuseable name
@@ -562,6 +569,7 @@ namespace MPTranslator
                 return () => {
                     stateStack.Push(newState);
                     tokenStack.Push(inputQueue.Dequeue());
+                    Console.WriteLine("ACTION: Shift {0}", newState);
                 };
             }
 
@@ -573,14 +581,14 @@ namespace MPTranslator
                     for(int i = rule.body.Count; i > 0; --i)
                         { stateStack.Pop(); }
                     for(int i = rule.body.Count - 1; i >= 0; --i)
-                    {
-                        rule.body[i] = tokenStack.Pop();
-                    }
+                        { rule.body[i] = tokenStack.Pop(); }
 
                     rule.ApplyRule();
                     tokenStack.Push(rule.head);
 
                     stateStack.Push(GetStateFromGoto(stateStack.Peek(), tokenStack.Peek()) );
+
+                    Console.WriteLine("ACTION: Reduce rule {0} and Goto {1}", ruleIndex, stateStack.Peek());
                 };
             }
 
@@ -598,6 +606,30 @@ namespace MPTranslator
 
             private Dictionary<Tuple<int, TransToken>, Action> actionTable;
             private Dictionary<Tuple<int, TransToken>, int>    gotoTable;
+
+            private void PrintParsingProcess()
+            {
+                Console.Write("Input queue: ");
+                foreach (TransToken token in inputQueue)
+                {
+                    Console.Write("{0}.[{1}] ", token.token, token.attrVal);
+                }
+                Console.WriteLine();
+
+                Console.Write("Token stack: ");
+                foreach (TransToken token in tokenStack)
+                {
+                    Console.Write("{0}.[{1}] ", token.token, token.attrVal);
+                }
+                Console.WriteLine();
+
+                Console.Write("State stack: ");
+                foreach (int stateNum in stateStack)
+                {
+                    Console.Write("{0} ", stateNum);
+                }
+                Console.WriteLine();
+            }
 
             public void PrintState(TItemState state)
             {
